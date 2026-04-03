@@ -45,6 +45,30 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
+
+    // Smithery server card
+    if (request.method === "GET" && url.pathname === "/.well-known/mcp/server-card.json") {
+      return new Response(
+        JSON.stringify({
+          name: "costrack-mcp",
+          description: "Agent Cost Control Layer — Track, analyze, and control LLM and agent operational costs. 6 tools: log costs, generate reports, compare models, check budgets with projections, estimate costs, and browse pricing for 17+ models.",
+          version: "1.0.0",
+          tools: [
+            { name: "cost_log", description: "Record a cost event (LLM call, tool invocation, or custom cost)" },
+            { name: "cost_report", description: "Generate cost summary by scope and time period" },
+            { name: "cost_compare", description: "Compare costs between models, agents, or periods" },
+            { name: "budget_check", description: "Check spend vs budget with daily projection" },
+            { name: "cost_estimate", description: "Estimate cost before execution with alternative recommendations" },
+            { name: "pricing_table", description: "Browse current pricing for 17+ models across 5 providers" }
+          ],
+          connection: {
+            type: "streamable-http",
+            url: "https://costrack-mcp.nexus300.workers.dev/mcp"
+          }
+        }),
+        { headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
     // MCP endpoint
     if (url.pathname === "/mcp" || url.pathname === "/") {
       const response = await transport.handleRequest(request);
