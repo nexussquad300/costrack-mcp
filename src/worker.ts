@@ -71,7 +71,18 @@ export default {
     }
     // MCP endpoint
     if (url.pathname === "/mcp" || url.pathname === "/") {
-      const response = await transport.handleRequest(request);
+      // Ensure Accept header includes required types (Smithery scanner fix)
+      const headers = new Headers(request.headers);
+      if (!headers.get("Accept")?.includes("text/event-stream")) {
+        headers.set("Accept", "application/json, text/event-stream");
+      }
+      const patchedRequest = new Request(request.url, {
+        method: request.method,
+        headers,
+        body: request.body,
+        duplex: "half",
+      } as any);
+      const response = await transport.handleRequest(patchedRequest);
       const newHeaders = new Headers(response.headers);
       for (const [k, v] of Object.entries(corsHeaders())) newHeaders.set(k, v);
       return new Response(response.body, {
