@@ -1,20 +1,13 @@
 /**
  * Cloudflare Workers entry point for CosTrack MCP.
- * Thin wrapper — all tool logic lives in index.ts, storage in aggregator-do.ts.
+ * Stateless per-request pattern — new transport per request.
  */
-import { server, setEnv } from "./index.js";
+import { createServer, setEnv } from "./index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Env } from "./types/index.js";
 
 // Re-export the Durable Object class so wrangler can find it
 export { CostAggregator } from "./storage/aggregator-do.js";
-
-const transport = new WebStandardStreamableHTTPServerTransport({
-  sessionIdGenerator: () => crypto.randomUUID(),
-  enableJsonResponse: true,
-});
-
-await server.connect(transport);
 
 function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -27,7 +20,6 @@ function corsHeaders(extra: Record<string, string> = {}): Record<string, string>
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // Inject env so tool handlers can access KV + DO bindings
     setEnv(env);
 
     const url = new URL(request.url);
@@ -44,7 +36,6 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
-
 
     // Smithery server card
     if (request.method === "GET" && url.pathname === "/.well-known/mcp/server-card.json") {
@@ -69,8 +60,18 @@ export default {
         { headers: { ...corsHeaders(), "Content-Type": "application/json" } }
       );
     }
+
     // MCP endpoint
     if (url.pathname === "/mcp" || url.pathname === "/") {
+      // Create fresh transport + server per request (stateless Workers pattern)
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined as any,
+        enableJsonResponse: true,
+      });
+
+      const server = createServer();
+      await server.connect(transport);
+
       // Ensure Accept header includes required types (Smithery scanner fix)
       const headers = new Headers(request.headers);
       if (!headers.get("Accept")?.includes("text/event-stream")) {
@@ -82,6 +83,7 @@ export default {
         body: request.body,
         duplex: "half",
       } as any);
+
       const response = await transport.handleRequest(patchedRequest);
       const newHeaders = new Headers(response.headers);
       for (const [k, v] of Object.entries(corsHeaders())) newHeaders.set(k, v);

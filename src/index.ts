@@ -33,7 +33,8 @@ export function getEnv(): Env {
 
 // ━━━ MCP Server ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export const server = new Server(
+export function createServer() {
+const server = new Server(
   { name: "costrack-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
@@ -278,3 +279,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
+  return server;
+}
