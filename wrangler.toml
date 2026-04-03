@@ -8,8 +8,8 @@ vars = { ENVIRONMENT = "production" }
 
 [[kv_namespaces]]
 binding = "COSTRACK_EVENTS"
-id = "<KV_NAMESPACE_ID>"
-preview_id = "<KV_PREVIEW_NAMESPACE_ID>"
+id = "f774e7bee4e34157b0c432e043274cf2"
+preview_id = "d954fa293c6e4aec999fb97fab9a3ea8"
 
 [[durable_objects.bindings]]
 name = "COST_AGGREGATOR"
@@ -17,4 +17,4 @@ class_name = "CostAggregator"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["CostAggregator"]
+new_sqlite_classes = ["CostAggregator"]
