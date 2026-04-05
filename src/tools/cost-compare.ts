@@ -1,10 +1,14 @@
-import { getEnv } from "../index.js";
 import { normalizeModel } from "../normalize/model-normalizer.js";
 import { doGetCompareData } from "../storage/do-client.js";
-import type { CostCompareInput, CostCompareOutput } from "../types/index.js";
+import { ValidationError } from "../utils/validate.js";
+import type { Env, CostCompareInput, CostCompareOutput } from "../types/index.js";
 
-export async function costCompare(args: CostCompareInput): Promise<CostCompareOutput> {
-  const env = getEnv();
+export async function costCompare(env: Env, args: CostCompareInput): Promise<CostCompareOutput> {
+  // Validate inputs
+  if (!Array.isArray(args.items) || args.items.length < 2)
+    throw new ValidationError("items must be an array with at least 2 entries");
+  if (args.items.length > 5)
+    throw new ValidationError("items must have at most 5 entries");
 
   // Normalize model names if comparing models
   const items =

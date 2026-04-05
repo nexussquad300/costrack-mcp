@@ -1,10 +1,19 @@
-import { getEnv } from "../index.js";
 import { doGetReport } from "../storage/do-client.js";
-import type { CostReportInput, CostReportOutput } from "../types/index.js";
+import { validateNonEmptyString, ValidationError } from "../utils/validate.js";
+import type { Env, CostReportInput, CostReportOutput } from "../types/index.js";
 
-export async function costReport(args: CostReportInput): Promise<CostReportOutput> {
-  const env = getEnv();
-  const report = await doGetReport(env, args.scope, args.scope_id, args.period);
+export async function costReport(env: Env, args: CostReportInput): Promise<CostReportOutput> {
+  // Validate inputs
+  const scope = validateNonEmptyString(args.scope, "scope");
+  const period = validateNonEmptyString(args.period, "period");
+  if (!["all", "agent", "task", "session", "model"].includes(scope))
+    throw new ValidationError(`scope must be one of: all, agent, task, session, model`);
+  if (!["today", "7d", "30d", "all"].includes(period))
+    throw new ValidationError(`period must be one of: today, 7d, 30d, all`);
+  if (scope !== "all" && !args.scope_id?.trim())
+    throw new ValidationError(`scope_id is required when scope is "${scope}"`);
+
+  const report = await doGetReport(env, scope, args.scope_id, period);
 
   const avgCostPerEvent =
     report.total_events > 0 ? report.total_cost_usd / report.total_events : 0;
@@ -26,8 +35,8 @@ export async function costReport(args: CostReportInput): Promise<CostReportOutpu
   const topSpenders = candidates.slice(0, 5);
 
   return {
-    scope: args.scope,
-    period: args.period,
+    scope,
+    period,
     total_cost_usd: report.total_cost_usd,
     total_events: report.total_events,
     avg_cost_per_event: Math.round(avgCostPerEvent * 1e10) / 1e10,

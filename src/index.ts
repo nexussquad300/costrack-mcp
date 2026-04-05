@@ -1,8 +1,9 @@
 /**
  * CosTrack MCP Server — core tool definitions and request routing.
  *
- * Env is injected per-request by worker.ts via setEnv() before the
- * transport handles the request.
+ * Env is passed per-request by worker.ts into createServer(env).
+ * Tool handlers are closures that capture env from the factory call,
+ * eliminating shared mutable state between requests.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
@@ -10,6 +11,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Env } from "./types/index.js";
+import { ValidationError } from "./utils/validate.js";
 
 import { costLog } from "./tools/cost-log.js";
 import { costReport } from "./tools/cost-report.js";
@@ -18,22 +20,9 @@ import { budgetCheck } from "./tools/budget-check.js";
 import { costEstimate } from "./tools/cost-estimate.js";
 import { pricingTable } from "./tools/pricing-table.js";
 
-// ━━━ Env injection (set by worker.ts per request) ━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-let _env: Env;
-
-export function setEnv(env: Env): void {
-  _env = env;
-}
-
-export function getEnv(): Env {
-  if (!_env) throw new Error("Env not initialized — setEnv() must be called before tool execution");
-  return _env;
-}
-
 // ━━━ MCP Server ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export function createServer() {
+export function createServer(env: Env) {
 const server = new Server(
   { name: "costrack-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -240,16 +229,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case "cost_log":
-        result = await costLog(args as any);
+        result = await costLog(env, args as any);
         break;
       case "cost_report":
-        result = await costReport(args as any);
+        result = await costReport(env, args as any);
         break;
       case "cost_compare":
-        result = await costCompare(args as any);
+        result = await costCompare(env, args as any);
         break;
       case "budget_check":
-        result = await budgetCheck(args as any);
+        result = await budgetCheck(env, args as any);
         break;
       case "cost_estimate":
         result = await costEstimate(args as any);
@@ -268,11 +257,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [{ type: "text" as const, text: JSON.stringify(result) }],
     };
   } catch (err) {
+    const message = err instanceof ValidationError
+      ? err.message
+      : (err instanceof Error ? err.message : String(err));
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+          text: JSON.stringify({ error: message }),
         },
       ],
       isError: true,

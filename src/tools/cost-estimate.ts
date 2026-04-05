@@ -1,10 +1,18 @@
 import { normalizeModel } from "../normalize/model-normalizer.js";
 import { PRICING_TABLE, lookupPricing } from "../pricing/pricing-table.js";
 import { calculateCost } from "../utils/cost-calculator.js";
+import { validateNonEmptyString, validatePositiveNumber, ValidationError } from "../utils/validate.js";
 import type { CostEstimateInput, CostEstimateOutput } from "../types/index.js";
 
 export async function costEstimate(args: CostEstimateInput): Promise<CostEstimateOutput> {
-  const modelCanonical = normalizeModel(args.model) ?? args.model;
+  // Validate inputs
+  const model = validateNonEmptyString(args.model, "model");
+  const estimated_input_tokens = validatePositiveNumber(args.estimated_input_tokens, "estimated_input_tokens");
+  const estimated_output_tokens = validatePositiveNumber(args.estimated_output_tokens, "estimated_output_tokens");
+  if (estimated_input_tokens > 10_000_000) throw new ValidationError("estimated_input_tokens exceeds maximum (10M)");
+  if (estimated_output_tokens > 10_000_000) throw new ValidationError("estimated_output_tokens exceeds maximum (10M)");
+
+  const modelCanonical = normalizeModel(model) ?? model;
   const pricing = lookupPricing(modelCanonical);
   const numCalls = args.num_calls ?? 1;
 
@@ -14,8 +22,8 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
 
   if (pricing) {
     const calc = calculateCost(
-      args.estimated_input_tokens,
-      args.estimated_output_tokens,
+      estimated_input_tokens,
+      estimated_output_tokens,
       pricing.input_price_per_mtok,
       pricing.output_price_per_mtok
     );
@@ -38,8 +46,8 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
     let cheapestModel: { model: string; cost: number } | null = null;
     for (const m of sameTier) {
       const c = calculateCost(
-        args.estimated_input_tokens,
-        args.estimated_output_tokens,
+        estimated_input_tokens,
+        estimated_output_tokens,
         m.input_price_per_mtok,
         m.output_price_per_mtok
       );
@@ -73,8 +81,8 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
       let bestValue: { model: string; cost: number } | null = null;
       for (const m of nextTierModels) {
         const c = calculateCost(
-          args.estimated_input_tokens,
-          args.estimated_output_tokens,
+          estimated_input_tokens,
+          estimated_output_tokens,
           m.input_price_per_mtok,
           m.output_price_per_mtok
         );
@@ -107,8 +115,8 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
       let cheapestSameProvider: { model: string; cost: number } | null = null;
       for (const m of sameProvider) {
         const c = calculateCost(
-          args.estimated_input_tokens,
-          args.estimated_output_tokens,
+          estimated_input_tokens,
+          estimated_output_tokens,
           m.input_price_per_mtok,
           m.output_price_per_mtok
         );

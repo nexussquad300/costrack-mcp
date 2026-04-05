@@ -145,7 +145,14 @@ export class CostAggregator extends DurableObject {
     if (input.idempotency_key) {
       if (await this.isIdempotent(input.idempotency_key)) {
         const totals = await this.getTotals();
-        return { running_session_total: totals.total_cost_usd, was_duplicate: true };
+        const sessionTotal = input.session_id
+          ? totals.by_session[input.session_id]?.cost_usd ?? 0
+          : null;
+        return {
+          running_global_total: totals.total_cost_usd,
+          running_session_total: sessionTotal,
+          was_duplicate: true,
+        };
       }
       await this.markIdempotent(input.idempotency_key);
     }
@@ -220,7 +227,14 @@ export class CostAggregator extends DurableObject {
 
     await this.saveDay(day);
 
-    return { running_session_total: totals.total_cost_usd, was_duplicate: false };
+    const sessionTotal = input.session_id
+      ? totals.by_session[input.session_id]?.cost_usd ?? 0
+      : null;
+    return {
+      running_global_total: totals.total_cost_usd,
+      running_session_total: sessionTotal,
+      was_duplicate: false,
+    };
   }
 
   // ── Get Report ────────────────────────────────────────────────────────────

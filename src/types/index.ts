@@ -50,7 +50,8 @@ export interface CostLogOutput {
   input_cost_usd: number | null;
   output_cost_usd: number | null;
   model_canonical: string;
-  running_session_total: number;
+  running_global_total: number;
+  running_session_total: number | null;
   was_duplicate: boolean;
   hard_limit_status?: "OK" | "HARD_LIMIT_REACHED";
 }
@@ -178,7 +179,8 @@ export interface AddEventInput {
 }
 
 export interface AddEventResult {
-  running_session_total: number;
+  running_global_total: number;
+  running_session_total: number | null;
   was_duplicate: boolean;
 }
 

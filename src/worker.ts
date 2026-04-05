@@ -2,7 +2,7 @@
  * Cloudflare Workers entry point for CosTrack MCP.
  * Stateless per-request pattern — new transport per request.
  */
-import { createServer, setEnv } from "./index.js";
+import { createServer } from "./index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Env } from "./types/index.js";
 
@@ -20,8 +20,6 @@ function corsHeaders(extra: Record<string, string> = {}): Record<string, string>
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    setEnv(env);
-
     const url = new URL(request.url);
 
     // Health check
@@ -63,35 +61,45 @@ export default {
 
     // MCP endpoint
     if (url.pathname === "/mcp" || url.pathname === "/") {
-      // Create fresh transport + server per request (stateless Workers pattern)
-      const transport = new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: undefined as any,
-        enableJsonResponse: true,
-      });
+      try {
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: undefined as any,
+          enableJsonResponse: true,
+        });
 
-      const server = createServer();
-      await server.connect(transport);
+        const server = createServer(env);
+        await server.connect(transport);
 
-      // Ensure Accept header includes required types (Smithery scanner fix)
-      const headers = new Headers(request.headers);
-      if (!headers.get("Accept")?.includes("text/event-stream")) {
-        headers.set("Accept", "application/json, text/event-stream");
+        // Ensure Accept header includes required types (Smithery scanner fix)
+        const headers = new Headers(request.headers);
+        if (!headers.get("Accept")?.includes("text/event-stream")) {
+          headers.set("Accept", "application/json, text/event-stream");
+        }
+        const patchedRequest = new Request(request.url, {
+          method: request.method,
+          headers,
+          body: request.body,
+          duplex: "half",
+        } as any);
+
+        const response = await transport.handleRequest(patchedRequest);
+        const newHeaders = new Headers(response.headers);
+        for (const [k, v] of Object.entries(corsHeaders())) newHeaders.set(k, v);
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: newHeaders,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Internal server error";
+        return new Response(
+          JSON.stringify({ error: message }),
+          {
+            status: 500,
+            headers: { ...corsHeaders(), "Content-Type": "application/json" },
+          }
+        );
       }
-      const patchedRequest = new Request(request.url, {
-        method: request.method,
-        headers,
-        body: request.body,
-        duplex: "half",
-      } as any);
-
-      const response = await transport.handleRequest(patchedRequest);
-      const newHeaders = new Headers(response.headers);
-      for (const [k, v] of Object.entries(corsHeaders())) newHeaders.set(k, v);
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: newHeaders,
-      });
     }
 
     return new Response("Not found", { status: 404 });
