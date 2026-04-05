@@ -119,8 +119,9 @@ export interface CostEstimateInput {
 
 export interface CostEstimateOutput {
   model_canonical: string;
-  estimated_total_cost_usd: number;
-  cost_per_call_usd: number;
+  pricing_available: boolean;
+  estimated_total_cost_usd: number | null;
+  cost_per_call_usd: number | null;
   alternatives: Array<{
     category: "cheapest" | "best_value" | "same_provider_cheaper";
     model: string;
@@ -128,6 +129,7 @@ export interface CostEstimateOutput {
     savings_usd: number;
     savings_percent: number;
   }>;
+  warning?: string;
 }
 
 export interface PricingTableInput {

@@ -32,6 +32,10 @@ function defaultDay(date: string): DayBreakdown {
   return { date, cost_usd: 0, events: 0, by_model: {}, by_agent: {}, by_task: {} };
 }
 
+function roundCost(value: number): number {
+  return Math.round(value * 1e10) / 1e10;
+}
+
 function getDateRange(period: string): string[] {
   const dates: string[] = [];
   const now = new Date();
@@ -81,8 +85,8 @@ export class CostAggregator extends DurableObject {
 
   private async isIdempotent(key: string): Promise<boolean> {
     if (this.idempotencyCache.has(key)) return true;
-    const stored = await this.ctx.storage.get<boolean>(`idem:${key}`);
-    if (stored) {
+    const stored = await this.ctx.storage.get(`idem:${key}`);
+    if (stored !== undefined) {
       this.idempotencyCache.add(key);
       return true;
     }
@@ -90,8 +94,40 @@ export class CostAggregator extends DurableObject {
   }
 
   private async markIdempotent(key: string): Promise<void> {
+    // Cap in-memory cache as safety valve (storage is source of truth)
+    if (this.idempotencyCache.size > 10_000) {
+      this.idempotencyCache.clear();
+    }
     this.idempotencyCache.add(key);
-    await this.ctx.storage.put(`idem:${key}`, true);
+    await this.ctx.storage.put(`idem:${key}`, Date.now());
+    // Bootstrap cleanup alarm on first idempotency key
+    const alarm = await this.ctx.storage.getAlarm();
+    if (!alarm) {
+      await this.ctx.storage.setAlarm(Date.now() + 6 * 60 * 60 * 1000);
+    }
+  }
+
+  // ── Idempotency TTL cleanup ──────────────────────────────────────────────
+
+  private async cleanupIdempotencyKeys(): Promise<void> {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours
+    const entries = await this.ctx.storage.list({ prefix: "idem:" });
+    const toDelete: string[] = [];
+    for (const [key, timestamp] of entries) {
+      if (typeof timestamp === "number" && timestamp < cutoff) {
+        toDelete.push(key);
+        this.idempotencyCache.delete(key.slice("idem:".length));
+      }
+    }
+    if (toDelete.length > 0) {
+      await this.ctx.storage.delete(toDelete);
+    }
+  }
+
+  async alarm(): Promise<void> {
+    await this.cleanupIdempotencyKeys();
+    // Reschedule every 6 hours
+    await this.ctx.storage.setAlarm(Date.now() + 6 * 60 * 60 * 1000);
   }
 
   // ── Fetch router ──────────────────────────────────────────────────────────
@@ -162,7 +198,7 @@ export class CostAggregator extends DurableObject {
 
     // Update all-time totals
     const totals = await this.getTotals();
-    totals.total_cost_usd += cost;
+    totals.total_cost_usd = roundCost(totals.total_cost_usd + cost);
     totals.total_events += 1;
 
     // By model
@@ -170,7 +206,7 @@ export class CostAggregator extends DurableObject {
     if (!totals.by_model[mc]) {
       totals.by_model[mc] = { cost_usd: 0, events: 0, input_tokens: 0, output_tokens: 0 };
     }
-    totals.by_model[mc].cost_usd += cost;
+    totals.by_model[mc].cost_usd = roundCost(totals.by_model[mc].cost_usd + cost);
     totals.by_model[mc].events += 1;
     totals.by_model[mc].input_tokens += input.input_tokens;
     totals.by_model[mc].output_tokens += input.output_tokens;
@@ -180,7 +216,7 @@ export class CostAggregator extends DurableObject {
       if (!totals.by_agent[input.agent_id]) {
         totals.by_agent[input.agent_id] = { cost_usd: 0, events: 0 };
       }
-      totals.by_agent[input.agent_id].cost_usd += cost;
+      totals.by_agent[input.agent_id].cost_usd = roundCost(totals.by_agent[input.agent_id].cost_usd + cost);
       totals.by_agent[input.agent_id].events += 1;
     }
 
@@ -189,7 +225,7 @@ export class CostAggregator extends DurableObject {
       if (!totals.by_task[input.task_id]) {
         totals.by_task[input.task_id] = { cost_usd: 0, events: 0 };
       }
-      totals.by_task[input.task_id].cost_usd += cost;
+      totals.by_task[input.task_id].cost_usd = roundCost(totals.by_task[input.task_id].cost_usd + cost);
       totals.by_task[input.task_id].events += 1;
     }
 
@@ -198,34 +234,37 @@ export class CostAggregator extends DurableObject {
       if (!totals.by_session[input.session_id]) {
         totals.by_session[input.session_id] = { cost_usd: 0, events: 0 };
       }
-      totals.by_session[input.session_id].cost_usd += cost;
+      totals.by_session[input.session_id].cost_usd = roundCost(totals.by_session[input.session_id].cost_usd + cost);
       totals.by_session[input.session_id].events += 1;
     }
 
-    await this.saveTotals();
-
     // Update daily breakdown
     const day = await this.getDay(today);
-    day.cost_usd += cost;
+    day.cost_usd = roundCost(day.cost_usd + cost);
     day.events += 1;
 
     if (!day.by_model[mc]) day.by_model[mc] = { cost_usd: 0, events: 0 };
-    day.by_model[mc].cost_usd += cost;
+    day.by_model[mc].cost_usd = roundCost(day.by_model[mc].cost_usd + cost);
     day.by_model[mc].events += 1;
 
     if (input.agent_id) {
       if (!day.by_agent[input.agent_id]) day.by_agent[input.agent_id] = { cost_usd: 0, events: 0 };
-      day.by_agent[input.agent_id].cost_usd += cost;
+      day.by_agent[input.agent_id].cost_usd = roundCost(day.by_agent[input.agent_id].cost_usd + cost);
       day.by_agent[input.agent_id].events += 1;
     }
 
     if (input.task_id) {
       if (!day.by_task[input.task_id]) day.by_task[input.task_id] = { cost_usd: 0, events: 0 };
-      day.by_task[input.task_id].cost_usd += cost;
+      day.by_task[input.task_id].cost_usd = roundCost(day.by_task[input.task_id].cost_usd + cost);
       day.by_task[input.task_id].events += 1;
     }
 
-    await this.saveDay(day);
+    // Atomic write: totals + daily breakdown in one batch
+    this.totalsCache = totals;
+    await this.ctx.storage.put({
+      "totals": totals,
+      [`day:${today}`]: day,
+    });
 
     const sessionTotal = input.session_id
       ? totals.by_session[input.session_id]?.cost_usd ?? 0

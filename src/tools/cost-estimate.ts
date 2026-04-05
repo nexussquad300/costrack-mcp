@@ -12,9 +12,14 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
   if (estimated_input_tokens > 10_000_000) throw new ValidationError("estimated_input_tokens exceeds maximum (10M)");
   if (estimated_output_tokens > 10_000_000) throw new ValidationError("estimated_output_tokens exceeds maximum (10M)");
 
+  const numCalls = args.num_calls ?? 1;
+  if (typeof numCalls !== "number" || !Number.isFinite(numCalls) || numCalls < 1 || numCalls > 100_000) {
+    throw new ValidationError("num_calls must be between 1 and 100,000");
+  }
+
   const modelCanonical = normalizeModel(model) ?? model;
   const pricing = lookupPricing(modelCanonical);
-  const numCalls = args.num_calls ?? 1;
+  const pricingAvailable = pricing !== null;
 
   // Calculate cost for the requested model
   let costPerCall = 0;
@@ -141,10 +146,17 @@ export async function costEstimate(args: CostEstimateInput): Promise<CostEstimat
     }
   }
 
-  return {
+  const result: CostEstimateOutput = {
     model_canonical: modelCanonical,
-    estimated_total_cost_usd: Math.round(totalCost * 1e10) / 1e10,
-    cost_per_call_usd: Math.round(costPerCall * 1e10) / 1e10,
-    alternatives,
+    pricing_available: pricingAvailable,
+    estimated_total_cost_usd: pricingAvailable ? Math.round(totalCost * 1e10) / 1e10 : null,
+    cost_per_call_usd: pricingAvailable ? Math.round(costPerCall * 1e10) / 1e10 : null,
+    alternatives: pricingAvailable ? alternatives : [],
   };
+
+  if (!pricingAvailable) {
+    result.warning = "Model not in pricing table. Cost cannot be estimated.";
+  }
+
+  return result;
 }
